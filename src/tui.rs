@@ -11,7 +11,7 @@ use ratatui::{
 };
 use std::{io, time::Duration};
 
-use crate::app::{AppState, FilterMode, SortColumn, TcpState};
+use crate::app::{AppState, FilterMode, Health, SortColumn, TcpState};
 
 const HDR_STYLE: Style = Style::new()
     .fg(Color::Black)
@@ -21,13 +21,13 @@ const HDR_STYLE: Style = Style::new()
 pub fn draw(f: &mut Frame, app: &mut AppState, table_state: &mut TableState) {
     let area = f.area();
 
-    // Layout: header(1) + table(fill) + detail(7) + footer(1)
+    // Layout: header(1) + table(fill) + detail(9) + footer(1)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
             Constraint::Min(5),
-            Constraint::Length(7),
+            Constraint::Length(9),
             Constraint::Length(1),
         ])
         .split(area);
@@ -100,6 +100,7 @@ fn draw_table(f: &mut Frame, area: Rect, app: &mut AppState, table_state: &mut T
     };
 
     let header_cells = [
+        "●".to_string(),
         format!("Source{}", sort_indicator(&SortColumn::Src)),
         format!("Destination{}", sort_indicator(&SortColumn::Dst)),
         format!("State{}", sort_indicator(&SortColumn::State)),
@@ -192,6 +193,8 @@ fn draw_table(f: &mut Frame, area: Rect, app: &mut AppState, table_state: &mut T
             };
 
             Row::new(vec![
+                Cell::from(c.overall_health().dot().to_string())
+                    .style(Style::default().fg(c.overall_health().color())),
                 Cell::from(c.src.clone()),
                 Cell::from(c.dst.clone()),
                 Cell::from(c.state.short()).style(state_style),
@@ -207,6 +210,7 @@ fn draw_table(f: &mut Frame, area: Rect, app: &mut AppState, table_state: &mut T
         .collect();
 
     let widths = [
+        Constraint::Length(3),
         Constraint::Min(20),
         Constraint::Min(20),
         Constraint::Length(7),
@@ -245,97 +249,144 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &AppState) {
         return;
     };
 
-    let na = |v: f64, unit: &str| -> String {
-        if v == 0.0 {
-            "  n/a ".to_string()
-        } else {
-            format!("{v:.3}{unit}")
-        }
+    let badge = |h: Health| -> Span {
+        Span::styled(format!("[{}]", h.badge()), Style::default().fg(h.color()))
     };
-    let na_u64 = |v: u64| -> String {
-        if v == 0 {
-            "n/a".to_string()
+    let dot = |h: Health| -> Span {
+        Span::styled(
+            h.dot().to_string(),
+            Style::default().fg(h.color()).add_modifier(Modifier::BOLD),
+        )
+    };
+    let fmt_ssthresh = |v: u32| -> String {
+        if v >= 0x7fff_0000 {
+            "∞".to_string()
         } else {
-            format_bytes(v)
+            format_bytes(v as u64)
         }
     };
 
+    // Category health
+    let lat_h = [conn.rtt_health(), conn.jitter_health(), conn.rto_health()]
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(Health::Good);
+    let cong_h = conn.ca_health();
+    let loss_h = [
+        conn.loss_health(),
+        conn.retrans_health(),
+        conn.dsack_health(),
+    ]
+    .iter()
+    .copied()
+    .max()
+    .unwrap_or(Health::Good);
+    let reord_h = [conn.reorder_health(), conn.ooo_health()]
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(Health::Good);
+    let buf_h = [
+        conn.notsent_health(),
+        conn.rwnd_health(),
+        conn.sndbuf_health(),
+    ]
+    .iter()
+    .copied()
+    .max()
+    .unwrap_or(Health::Good);
+
     let lines = vec![
+        // Line 1: LATENCY
         Line::from(vec![
-            Span::raw("  RTT: "),
-            Span::styled(
-                format!("{:.3}ms", conn.rtt_ms()),
-                Style::default().fg(Color::Cyan),
-            ),
-            Span::raw(format!("  jitter: {:.3}ms", conn.rttvar_ms())),
-            Span::raw(format!("  min(kern): {}", na(conn.kern_min_rtt_ms(), "ms"))),
-            Span::raw(format!("  min(seen): {}", na(conn.rtt_min_ms(), "ms"))),
-            Span::raw(format!("  max: {:.3}ms", conn.rtt_max_ms())),
-            Span::raw(format!("  avg: {:.3}ms", conn.rtt_avg_ms())),
-            Span::raw(format!("  RTO: {:.1}ms", conn.rto_ms())),
+            Span::raw(" "),
+            dot(lat_h),
+            Span::raw(format!(" {:<12}", "LATENCY")),
+            Span::raw(format!("RTT: {:.3}ms ", conn.rtt_ms())),
+            badge(conn.rtt_health()),
+            Span::raw(format!("  Jitter: {:.3}ms ", conn.rttvar_ms())),
+            badge(conn.jitter_health()),
+            Span::raw(format!("  MinRTT: {:.3}ms", conn.kern_min_rtt_ms())),
+            Span::raw(format!("  RTO: {:.0}ms ", conn.rto_ms())),
+            badge(conn.rto_health()),
         ]),
+        // Line 2: CONGESTION
         Line::from(vec![
-            Span::raw("  CA: "),
-            Span::styled(
-                conn.ca_state_str(),
-                if conn.ca_is_bad() {
-                    Style::default()
-                        .fg(Color::LightRed)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::Green)
-                },
-            ),
-            Span::raw(format!(
-                "  Unacked: {}  Sacked: {}  Lost: {}  In-flight retrans: {}",
-                conn.unacked, conn.lost, conn.lost, conn.retrans_in_flight
-            )),
+            Span::raw(" "),
+            dot(cong_h),
+            Span::raw(format!(" {:<12}", "CONGESTION")),
+            Span::raw("CA: "),
+            Span::styled(conn.ca_state_str(), Style::default().fg(cong_h.color())),
+            Span::raw(" "),
+            badge(conn.ca_health()),
+            Span::raw(format!("  CWND: {}", conn.cwnd)),
+            Span::raw(format!("  ssthresh: {}", fmt_ssthresh(conn.snd_ssthresh))),
+            Span::raw(format!("  Unacked: {}", conn.unacked)),
+            Span::raw(format!("  Retrans: {} ", conn.total_retrans)),
+            badge(conn.retrans_health()),
         ]),
+        // Line 3: LOSS
         Line::from(vec![
-            Span::raw("  Retrans: "),
-            Span::styled(
-                format!("{}", conn.total_retrans),
-                if conn.total_retrans > 0 {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default().fg(Color::Green)
-                },
-            ),
-            Span::raw(format!(
-                "  rate: {:.3}%  | Loss%: {:.3}%  (lost pkts: {})",
-                conn.retrans_rate_pct(),
-                conn.loss_pct(),
-                conn.lost
-            )),
-            Span::raw(format!(
-                "  bytes retrans: {} ({:.3}%)",
-                na_u64(conn.bytes_retrans),
-                conn.bytes_retrans_pct()
-            )),
+            Span::raw(" "),
+            dot(loss_h),
+            Span::raw(format!(" {:<12}", "LOSS")),
+            Span::raw(format!("Loss%: {:.2}% ", conn.loss_pct())),
+            badge(conn.loss_health()),
+            Span::raw(format!("  Retrans%: {:.3}% ", conn.retrans_rate_pct())),
+            badge(conn.retrans_health()),
+            Span::raw(format!("  InFlight: {}", conn.retrans_in_flight)),
+            Span::raw(format!("  DSACK: {} ", conn.dsack_dups)),
+            badge(conn.dsack_health()),
         ]),
+        // Line 4: REORDER
         Line::from(vec![
-            Span::raw("  Delivery rate: "),
-            Span::styled(
-                format!("{:.2} MB/s", conn.delivery_rate_mbps()),
-                Style::default().fg(Color::Cyan),
-            ),
+            Span::raw(" "),
+            dot(reord_h),
+            Span::raw(format!(" {:<12}", "REORDER")),
+            Span::raw(format!("OOO: {} ", conn.rcv_ooopack)),
+            badge(conn.ooo_health()),
+            Span::raw(format!("  Reorder-events: {} ", conn.reord_seen)),
+            badge(conn.reorder_health()),
             Span::raw(format!(
-                "  Sent: {}  Recv: {}",
-                na_u64(conn.bytes_sent),
-                na_u64(0u64)
-            )),
-            Span::raw(format!(
-                "  Segs out: {}  Segs in: {}",
-                conn.segs_out, conn.segs_in
+                "  Rcv-RTT: {:.3}ms",
+                conn.rcv_rtt_us as f64 / 1000.0
             )),
         ]),
+        // Line 5: THROUGHPUT
         Line::from(vec![
-            Span::raw(format!(
-                "  CWND: {}  MSS: {}  PMTU: {}",
-                conn.cwnd, conn.snd_mss, conn.pmtu
-            )),
-            Span::raw(format!("  Samples: {}", conn.samples)),
+            Span::raw(" "),
+            dot(Health::Good),
+            Span::raw(format!(" {:<12}", "THROUGHPUT")),
+            Span::raw(format!("Rate: {:.2} MB/s", conn.delivery_rate_mbps())),
+            Span::raw(format!("  Sent: {}", format_bytes(conn.bytes_sent))),
+            Span::raw(format!("  Segs ↑{} ↓{}", conn.segs_out, conn.segs_in)),
+            Span::raw(format!("  Delivered: {}", conn.delivered)),
         ]),
+        // Line 6: BUFFERS
+        Line::from(vec![
+            Span::raw(" "),
+            dot(buf_h),
+            Span::raw(format!(" {:<12}", "BUFFERS")),
+            Span::raw(format!(
+                "Notsent: {} ",
+                format_bytes(conn.notsent_bytes as u64)
+            )),
+            badge(conn.notsent_health()),
+            Span::raw(format!(
+                "  RcvSpace: {}",
+                format_bytes(conn.rcv_space as u64)
+            )),
+            Span::raw(format!("  RwndLtd: {:.1}% ", conn.rwnd_limited_pct())),
+            badge(conn.rwnd_health()),
+            Span::raw(format!("  BufLtd: {:.1}% ", conn.sndbuf_limited_pct())),
+            badge(conn.sndbuf_health()),
+        ]),
+        // Line 7: PATH
+        Line::from(vec![Span::raw(format!(
+            "   {:<12}PMTU: {}  MSS: {}  ECN-CE: {}  Samples: {}",
+            "PATH", conn.pmtu, conn.snd_mss, conn.delivered_ce, conn.samples
+        ))]),
     ];
 
     let para = Paragraph::new(lines).block(
@@ -362,7 +413,7 @@ fn format_bytes(n: u64) -> String {
 fn draw_footer(f: &mut Frame, area: Rect, app: &AppState) {
     let filter_hint = match app.filter_mode {
         FilterMode::None => {
-            " F3 SrcFilter  F4 DstFilter  F6 SortBy(RTT/Jitter/Retrans/Loss/Rate/…)  R Reverse  ESC Clear  q Quit "
+            " F3 SrcFilter  F4 DstFilter  F6 SortBy(Health/RTT/Jitter/Retrans/Loss/Rate/…)  R Reverse  ESC Clear  q Quit "
         }
         FilterMode::Src => " [Editing Src Filter — type to filter, ESC when done] ",
         FilterMode::Dst => " [Editing Dst Filter — type to filter, ESC when done] ",

@@ -1,7 +1,36 @@
 // Application state: connection list, sort/filter state, selected row
 
+use ratatui::style::Color;
 use std::collections::HashMap;
 use std::fmt;
+
+/// Three-level health grade for each TCP metric
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Health {
+    Good = 0,
+    Warn = 1,
+    Bad = 2,
+}
+
+impl Health {
+    pub fn color(self) -> Color {
+        match self {
+            Self::Good => Color::Green,
+            Self::Warn => Color::Yellow,
+            Self::Bad => Color::LightRed,
+        }
+    }
+    pub fn badge(self) -> &'static str {
+        match self {
+            Self::Good => "✓",
+            Self::Warn => "!",
+            Self::Bad => "✗",
+        }
+    }
+    pub fn dot(self) -> &'static str {
+        "●"
+    }
+}
 
 /// TCP connection state enum
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +125,27 @@ pub struct ConnInfo {
     pub rtt_min_us: u32, // our tracked min (across all samples)
     pub rtt_max_us: u32,
     pub rtt_sum_us: u64,
+    // ── Congestion thresholds ──────────────────────────────────────────────────
+    pub snd_ssthresh: u32, // slow start threshold
+    pub rcv_ssthresh: u32, // receiver slow start threshold
+    // ── Receiver metrics ───────────────────────────────────────────────────────
+    pub rcv_rtt_us: u32,    // receiver-side RTT estimate (us)
+    pub rcv_space: u32,     // receive buffer space (bytes)
+    pub notsent_bytes: u32, // bytes queued but not yet sent
+    // ── Data segment counts ────────────────────────────────────────────────────
+    pub data_segs_out: u32, // data-only segments sent (kernel 4.2+)
+    pub data_segs_in: u32,  // data-only segments received
+    // ── Time accounting (kernel 4.18+) ────────────────────────────────────────
+    pub busy_time_us: u64,      // time connection was busy (us)
+    pub rwnd_limited_us: u64,   // time receiver window was limiting (us)
+    pub sndbuf_limited_us: u64, // time send buffer was limiting (us)
+    // ── Delivery / ECN ────────────────────────────────────────────────────────
+    pub delivered: u32,    // segments delivered successfully (kernel 4.9+)
+    pub delivered_ce: u32, // segments delivered with ECN CE mark
+    // ── Anomaly counters ──────────────────────────────────────────────────────
+    pub dsack_dups: u32,  // DSACK blocks received (spurious retransmit indicator)
+    pub reord_seen: u32,  // reordering events observed
+    pub rcv_ooopack: u32, // out-of-order packets received (kernel 5.4+)
 }
 
 impl ConnInfo {
@@ -108,6 +158,7 @@ impl ConnInfo {
     pub fn rto_ms(&self) -> f64 {
         self.rto_us as f64 / 1000.0
     }
+    #[allow(dead_code)]
     pub fn rtt_avg_ms(&self) -> f64 {
         if self.samples == 0 {
             0.0
@@ -115,6 +166,7 @@ impl ConnInfo {
             self.rtt_sum_us as f64 / self.samples as f64 / 1000.0
         }
     }
+    #[allow(dead_code)]
     pub fn rtt_min_ms(&self) -> f64 {
         if self.rtt_min_us == u32::MAX {
             0.0
@@ -122,10 +174,10 @@ impl ConnInfo {
             self.rtt_min_us as f64 / 1000.0
         }
     }
+    #[allow(dead_code)]
     pub fn rtt_max_ms(&self) -> f64 {
         self.rtt_max_us as f64 / 1000.0
     }
-    /// Kernel-tracked min RTT in ms (0 if not available)
     pub fn kern_min_rtt_ms(&self) -> f64 {
         self.min_rtt_us as f64 / 1000.0
     }
@@ -171,6 +223,178 @@ impl ConnInfo {
         self.ca_state >= 3
     }
 
+    // ─── Per-metric health ─────────────────────────────────────────────────────
+
+    pub fn rtt_health(&self) -> Health {
+        if self.rtt_us == 0 {
+            return Health::Good;
+        }
+        if self.rtt_us < 10_000 {
+            Health::Good
+        } else if self.rtt_us < 100_000 {
+            Health::Warn
+        } else {
+            Health::Bad
+        }
+    }
+
+    pub fn jitter_health(&self) -> Health {
+        if self.rttvar_us == 0 || self.rtt_us == 0 {
+            return Health::Good;
+        }
+        let ratio = self.rttvar_us as f64 / self.rtt_us as f64;
+        if ratio < 0.25 {
+            Health::Good
+        } else if ratio < 0.75 {
+            Health::Warn
+        } else {
+            Health::Bad
+        }
+    }
+
+    pub fn loss_health(&self) -> Health {
+        let pct = self.loss_pct();
+        if pct == 0.0 {
+            Health::Good
+        } else if pct < 0.1 {
+            Health::Warn
+        } else {
+            Health::Bad
+        }
+    }
+
+    pub fn retrans_health(&self) -> Health {
+        let rate = self.retrans_rate_pct();
+        if rate == 0.0 {
+            Health::Good
+        } else if rate < 1.0 {
+            Health::Warn
+        } else {
+            Health::Bad
+        }
+    }
+
+    pub fn ca_health(&self) -> Health {
+        match self.ca_state {
+            0 => Health::Good,
+            1 | 2 => Health::Warn,
+            _ => Health::Bad,
+        }
+    }
+
+    pub fn rto_health(&self) -> Health {
+        if self.rto_us == 0 {
+            return Health::Good;
+        }
+        if self.rto_us < 500_000 {
+            Health::Good
+        } else if self.rto_us < 3_000_000 {
+            Health::Warn
+        } else {
+            Health::Bad
+        }
+    }
+
+    pub fn dsack_health(&self) -> Health {
+        if self.dsack_dups == 0 {
+            Health::Good
+        } else if self.dsack_dups <= 5 {
+            Health::Warn
+        } else {
+            Health::Bad
+        }
+    }
+
+    pub fn reorder_health(&self) -> Health {
+        if self.reord_seen == 0 {
+            Health::Good
+        } else if self.reord_seen <= 3 {
+            Health::Warn
+        } else {
+            Health::Bad
+        }
+    }
+
+    pub fn ooo_health(&self) -> Health {
+        if self.rcv_ooopack == 0 {
+            Health::Good
+        } else if self.rcv_ooopack <= 10 {
+            Health::Warn
+        } else {
+            Health::Bad
+        }
+    }
+
+    pub fn notsent_health(&self) -> Health {
+        if self.notsent_bytes < 65_536 {
+            Health::Good
+        } else if self.notsent_bytes < 1_048_576 {
+            Health::Warn
+        } else {
+            Health::Bad
+        }
+    }
+
+    /// % of busy time that was receiver-window limited (0 if no busy_time data)
+    pub fn rwnd_limited_pct(&self) -> f64 {
+        if self.busy_time_us == 0 {
+            return 0.0;
+        }
+        self.rwnd_limited_us as f64 / self.busy_time_us as f64 * 100.0
+    }
+
+    /// % of busy time that was send-buffer limited
+    pub fn sndbuf_limited_pct(&self) -> f64 {
+        if self.busy_time_us == 0 {
+            return 0.0;
+        }
+        self.sndbuf_limited_us as f64 / self.busy_time_us as f64 * 100.0
+    }
+
+    pub fn rwnd_health(&self) -> Health {
+        let pct = self.rwnd_limited_pct();
+        if pct < 5.0 {
+            Health::Good
+        } else if pct < 25.0 {
+            Health::Warn
+        } else {
+            Health::Bad
+        }
+    }
+
+    pub fn sndbuf_health(&self) -> Health {
+        let pct = self.sndbuf_limited_pct();
+        if pct < 5.0 {
+            Health::Good
+        } else if pct < 25.0 {
+            Health::Warn
+        } else {
+            Health::Bad
+        }
+    }
+
+    /// Overall connection health = worst of all metric health levels
+    pub fn overall_health(&self) -> Health {
+        [
+            self.rtt_health(),
+            self.jitter_health(),
+            self.loss_health(),
+            self.retrans_health(),
+            self.ca_health(),
+            self.rto_health(),
+            self.dsack_health(),
+            self.reorder_health(),
+            self.ooo_health(),
+            self.notsent_health(),
+            self.rwnd_health(),
+            self.sndbuf_health(),
+        ]
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(Health::Good)
+    }
+
     /// Merge fresh data from a new query, preserving historical stats
     pub fn update(&mut self, fresh: &ConnInfo) {
         self.retrans_delta = fresh.total_retrans.saturating_sub(self.total_retrans);
@@ -192,6 +416,21 @@ impl ConnInfo {
         self.bytes_retrans = fresh.bytes_retrans;
         self.pmtu = fresh.pmtu;
         self.snd_mss = fresh.snd_mss;
+        self.snd_ssthresh = fresh.snd_ssthresh;
+        self.rcv_ssthresh = fresh.rcv_ssthresh;
+        self.rcv_rtt_us = fresh.rcv_rtt_us;
+        self.rcv_space = fresh.rcv_space;
+        self.notsent_bytes = fresh.notsent_bytes;
+        self.data_segs_out = fresh.data_segs_out;
+        self.data_segs_in = fresh.data_segs_in;
+        self.busy_time_us = fresh.busy_time_us;
+        self.rwnd_limited_us = fresh.rwnd_limited_us;
+        self.sndbuf_limited_us = fresh.sndbuf_limited_us;
+        self.delivered = fresh.delivered;
+        self.delivered_ce = fresh.delivered_ce;
+        self.dsack_dups = fresh.dsack_dups;
+        self.reord_seen = fresh.reord_seen;
+        self.rcv_ooopack = fresh.rcv_ooopack;
         if fresh.rtt_us > 0 {
             self.samples += 1;
             self.rtt_sum_us += fresh.rtt_us as u64;
@@ -208,6 +447,7 @@ impl ConnInfo {
 /// Column used for sorting
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SortColumn {
+    Health,
     Src,
     Dst,
     State,
@@ -222,6 +462,7 @@ pub enum SortColumn {
 impl SortColumn {
     pub fn next(&self) -> Self {
         match self {
+            Self::Health => Self::Src,
             Self::Src => Self::Dst,
             Self::Dst => Self::State,
             Self::State => Self::Rtt,
@@ -230,12 +471,13 @@ impl SortColumn {
             Self::Retrans => Self::Loss,
             Self::Loss => Self::Rate,
             Self::Rate => Self::Cwnd,
-            Self::Cwnd => Self::Src,
+            Self::Cwnd => Self::Health,
         }
     }
     #[allow(dead_code)]
     pub fn label(&self) -> &'static str {
         match self {
+            Self::Health => "Health",
             Self::Src => "Source",
             Self::Dst => "Destination",
             Self::State => "State",
@@ -314,6 +556,7 @@ impl AppState {
         v.sort_by(|a, b| {
             use std::cmp::Ordering;
             let ord = match self.sort_col {
+                SortColumn::Health => a.overall_health().cmp(&b.overall_health()),
                 SortColumn::Src => a.src.cmp(&b.src),
                 SortColumn::Dst => a.dst.cmp(&b.dst),
                 SortColumn::State => a.state.short().cmp(b.state.short()),

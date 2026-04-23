@@ -147,7 +147,8 @@ struct TcpInfo {
     bytes_sent: u64,
     bytes_retrans: u64, // bytes retransmitted (offset 208)
     dsack_dups: u32,
-    reord_seen: u32, // reorder events (offset 220)
+    reord_seen: u32,  // reorder events (offset 220)
+    rcv_ooopack: u32, // out-of-order packets received (kernel 5.4+, offset 224)
 }
 
 /// Minimum bytes the kernel always provides (through total_retrans, offset 100).
@@ -325,70 +326,46 @@ fn build_conn_info(msg: &InetDiagMsg, tcp_info: Option<TcpInfo>, family: u8) -> 
     let key = format!("{src}→{dst}");
     let state = TcpState::from_u8(msg.idiag_state);
 
-    let (
-        rtt_us,
-        rttvar_us,
-        total_retrans,
-        cwnd,
-        ca_state,
-        rto_us,
-        unacked,
-        lost,
-        retrans_in_flight,
-        segs_out,
-        segs_in,
-        min_rtt_us,
-        delivery_rate_bps,
-        bytes_sent,
-        bytes_retrans,
-        pmtu,
-        snd_mss,
-    ) = tcp_info
-        .map(|t| {
-            (
-                t.rtt,
-                t.rttvar,
-                t.total_retrans,
-                t.snd_cwnd,
-                t.ca_state,
-                t.rto,
-                t.unacked,
-                t.lost,
-                t.retrans,
-                t.segs_out,
-                t.segs_in,
-                t.min_rtt,
-                t.delivery_rate,
-                t.bytes_sent,
-                t.bytes_retrans,
-                t.pmtu,
-                t.snd_mss,
-            )
-        })
-        .unwrap_or((0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
+    let info = tcp_info.unwrap_or_default();
 
+    let rtt_us = info.rtt;
     Some(ConnInfo {
         key,
         src,
         dst,
         state,
         rtt_us,
-        rttvar_us,
-        total_retrans,
-        cwnd,
-        ca_state,
-        rto_us,
-        unacked,
-        lost,
-        retrans_in_flight,
-        segs_out,
-        segs_in,
-        min_rtt_us,
-        delivery_rate_bps,
-        bytes_sent,
-        bytes_retrans,
-        pmtu,
-        snd_mss,
+        rttvar_us: info.rttvar,
+        total_retrans: info.total_retrans,
+        cwnd: info.snd_cwnd,
+        ca_state: info.ca_state,
+        rto_us: info.rto,
+        unacked: info.unacked,
+        lost: info.lost,
+        retrans_in_flight: info.retrans,
+        segs_out: info.segs_out,
+        segs_in: info.segs_in,
+        min_rtt_us: info.min_rtt,
+        delivery_rate_bps: info.delivery_rate,
+        bytes_sent: info.bytes_sent,
+        bytes_retrans: info.bytes_retrans,
+        pmtu: info.pmtu,
+        snd_mss: info.snd_mss,
+        snd_ssthresh: info.snd_ssthresh,
+        rcv_ssthresh: info.rcv_ssthresh,
+        rcv_rtt_us: info.rcv_rtt,
+        rcv_space: info.rcv_space,
+        notsent_bytes: info.notsent_bytes,
+        data_segs_out: info.data_segs_out,
+        data_segs_in: info.data_segs_in,
+        busy_time_us: info.busy_time,
+        rwnd_limited_us: info.rwnd_limited,
+        sndbuf_limited_us: info.sndbuf_limited,
+        delivered: info.delivered,
+        delivered_ce: info.delivered_ce,
+        dsack_dups: info.dsack_dups,
+        reord_seen: info.reord_seen,
+        rcv_ooopack: info.rcv_ooopack,
         retrans_delta: 0,
         samples: if rtt_us > 0 { 1 } else { 0 },
         rtt_min_us: if rtt_us > 0 { rtt_us } else { u32::MAX },
