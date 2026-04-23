@@ -510,6 +510,8 @@ pub struct AppState {
     pub filter_dst: String,
     pub filter_mode: FilterMode,
     pub selected: usize,
+    /// Whether the help overlay is shown
+    pub show_help: bool,
 }
 
 impl AppState {
@@ -523,6 +525,7 @@ impl AppState {
             filter_dst: String::new(),
             filter_mode: FilterMode::None,
             selected: 0,
+            show_help: false,
         }
     }
 

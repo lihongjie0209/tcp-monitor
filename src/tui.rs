@@ -4,10 +4,10 @@ use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState},
 };
 use std::{io, time::Duration};
 
@@ -36,6 +36,10 @@ pub fn draw(f: &mut Frame, app: &mut AppState, table_state: &mut TableState) {
     draw_table(f, chunks[1], app, table_state);
     draw_detail(f, chunks[2], app);
     draw_footer(f, chunks[3], app);
+
+    if app.show_help {
+        draw_help(f, area);
+    }
 }
 
 fn draw_header(f: &mut Frame, area: Rect, app: &AppState) {
@@ -413,14 +417,206 @@ fn format_bytes(n: u64) -> String {
 fn draw_footer(f: &mut Frame, area: Rect, app: &AppState) {
     let filter_hint = match app.filter_mode {
         FilterMode::None => {
-            " F3 SrcFilter  F4 DstFilter  F6 SortBy(Health/RTT/Jitter/Retrans/Loss/Rate/…)  R Reverse  ESC Clear  q Quit "
+            " ?/h 帮助  F3 源地址过滤  F4 目标过滤  F6 排序切换  R 反转  ESC 清除  q 退出 "
         }
-        FilterMode::Src => " [Editing Src Filter — type to filter, ESC when done] ",
-        FilterMode::Dst => " [Editing Dst Filter — type to filter, ESC when done] ",
+        FilterMode::Src => " [编辑源地址过滤 — 输入关键字，ESC 完成] ",
+        FilterMode::Dst => " [编辑目标过滤 — 输入关键字，ESC 完成] ",
     };
     let para =
         Paragraph::new(filter_hint).style(Style::default().bg(Color::DarkGray).fg(Color::White));
     f.render_widget(para, area);
+}
+
+/// Centered help overlay showing all metrics explained in Chinese
+fn draw_help(f: &mut Frame, area: Rect) {
+    // Center a 70×44 popup
+    let popup_w = 70u16.min(area.width.saturating_sub(4));
+    let popup_h = 44u16.min(area.height.saturating_sub(2));
+    let x = area.x + area.width.saturating_sub(popup_w) / 2;
+    let y = area.y + area.height.saturating_sub(popup_h) / 2;
+    let popup_area = Rect::new(x, y, popup_w, popup_h);
+
+    let title_s = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let key_s = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let good_s = Style::default().fg(Color::Green);
+    let warn_s = Style::default().fg(Color::Yellow);
+    let bad_s = Style::default().fg(Color::LightRed);
+    let dim_s = Style::default().fg(Color::DarkGray);
+
+    macro_rules! sec {
+        ($t:expr) => {
+            Line::from(vec![Span::styled(format!("  ── {} ", $t), title_s)])
+        };
+    }
+    macro_rules! row {
+        ($name:expr, $desc:expr, $good:expr, $warn:expr, $bad:expr) => {
+            Line::from(vec![
+                Span::raw(format!("  {:12}", $name)),
+                Span::raw(format!("{:28}", $desc)),
+                Span::styled(format!("✓{:<13}", $good), good_s),
+                Span::styled(format!("!{:<13}", $warn), warn_s),
+                Span::styled(format!("✗{}", $bad), bad_s),
+            ])
+        };
+    }
+    macro_rules! info_row {
+        ($name:expr, $desc:expr) => {
+            Line::from(vec![
+                Span::raw(format!("  {:12}", $name)),
+                Span::styled($desc, dim_s),
+            ])
+        };
+    }
+
+    let header = Line::from(vec![
+        Span::raw(format!("  {:12}", "指标")),
+        Span::raw(format!("{:28}", "说明")),
+        Span::styled(format!("✓{:<13}", "正常"), good_s),
+        Span::styled(format!("!{:<13}", "告警"), warn_s),
+        Span::styled("✗异常", bad_s),
+    ]);
+
+    let lines = vec![
+        Line::from(vec![Span::styled(" tcp-monitor 指标说明", title_s)]),
+        Line::from(""),
+        sec!("延迟 LATENCY"),
+        header.clone(),
+        row!(
+            "RTT",
+            "往返时延，反映网络基础延迟",
+            "<10ms",
+            "10~100ms",
+            "≥100ms"
+        ),
+        row!(
+            "Jitter",
+            "RTT 抖动(变化量/RTT)，反映延迟稳定性",
+            "<25%",
+            "25~75%",
+            "≥75%"
+        ),
+        row!("MinRTT", "历史最低 RTT（内核记录），仅展示", "—", "—", "—"),
+        row!(
+            "RTO",
+            "重传超时时间，过大说明链路不稳",
+            "<500ms",
+            "500ms~3s",
+            "≥3s"
+        ),
+        Line::from(""),
+        sec!("拥塞 CONGESTION"),
+        row!(
+            "CA State",
+            "拥塞控制状态机",
+            "Open",
+            "Disorder/CWR",
+            "Recovery/Loss"
+        ),
+        row!("CWND", "拥塞窗口(段)，反映可并发发送量", "—", "—", "—"),
+        row!(
+            "ssthresh",
+            "慢启动阈值，CWND 降至此值说明曾经拥塞",
+            "—",
+            "—",
+            "—"
+        ),
+        row!("Unacked", "已发出但未收到 ACK 的字节数", "—", "—", "—"),
+        Line::from(""),
+        sec!("丢包 LOSS"),
+        row!(
+            "Loss%",
+            "估算丢包率 = lost/(segs_out+lost)",
+            "0%",
+            "<0.1%",
+            "≥0.1%"
+        ),
+        row!(
+            "Retrans%",
+            "重传率 = bytes_retrans/bytes_sent",
+            "0%",
+            "<1%",
+            "≥1%"
+        ),
+        row!("InFlight", "当前正在重传的段数", "—", "—", "—"),
+        row!("DSACK", "收到 DSACK 块数，指示伪重传次数", "0", "1~5", ">5"),
+        Line::from(""),
+        sec!("乱序 REORDER"),
+        row!(
+            "OOO",
+            "接收到的乱序包数量（kernel ≥5.4）",
+            "0",
+            "1~10",
+            ">10"
+        ),
+        row!("Reorder", "检测到的数据段乱序事件次数", "0", "1~3", ">3"),
+        row!("Rcv-RTT", "接收侧估算的 RTT（独立于发送侧）", "—", "—", "—"),
+        Line::from(""),
+        sec!("吞吐 THROUGHPUT"),
+        info_row!("Rate", "当前交付速率 MB/s（内核 pacing_rate 估算）"),
+        info_row!("Sent", "累计已发送字节数"),
+        info_row!("Segs", "↑ 发送段数  ↓ 接收段数"),
+        info_row!("Delivered", "成功交付的段数（含 ECN）"),
+        Line::from(""),
+        sec!("缓冲 BUFFERS"),
+        row!(
+            "Notsent",
+            "已入队但尚未发出的字节（发送积压）",
+            "<64KB",
+            "64KB~1MB",
+            "≥1MB"
+        ),
+        row!("RcvSpace", "接收缓冲区剩余空间", "—", "—", "—"),
+        row!(
+            "RwndLtd%",
+            "连接繁忙时被接收窗口限制的时间占比",
+            "<5%",
+            "5~25%",
+            "≥25%"
+        ),
+        row!(
+            "BufLtd%",
+            "连接繁忙时被发送缓冲限制的时间占比",
+            "<5%",
+            "5~25%",
+            "≥25%"
+        ),
+        Line::from(""),
+        sec!("路径 PATH"),
+        info_row!("PMTU", "路径最大传输单元（字节）"),
+        info_row!("MSS", "最大报文段大小（字节）"),
+        info_row!("ECN-CE", "收到 ECN 拥塞标记的包数"),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("  快捷键："),
+            Span::styled("?/h", key_s),
+            Span::raw(" 切换帮助  "),
+            Span::styled("↑↓", key_s),
+            Span::raw(" 选择连接  "),
+            Span::styled("F3/F4", key_s),
+            Span::raw(" 过滤  "),
+            Span::styled("F6", key_s),
+            Span::raw(" 排序  "),
+            Span::styled("R", key_s),
+            Span::raw(" 反转  "),
+            Span::styled("q", key_s),
+            Span::raw(" 退出"),
+        ]),
+    ];
+
+    f.render_widget(Clear, popup_area);
+    let para = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" 帮助 — 按 ? 或 h 关闭 ")
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
+        .alignment(Alignment::Left);
+    f.render_widget(para, popup_area);
 }
 
 /// Returns true if the application should quit
@@ -449,6 +645,9 @@ pub fn handle_event(app: &mut AppState, timeout: Duration) -> io::Result<bool> {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Ok(true);
             }
+            KeyCode::Char('?') | KeyCode::Char('h') => {
+                app.show_help = !app.show_help;
+            }
             KeyCode::Char('R') | KeyCode::Char('r') => {
                 app.sort_asc = !app.sort_asc;
                 app.recompute_visible();
@@ -466,7 +665,11 @@ pub fn handle_event(app: &mut AppState, timeout: Duration) -> io::Result<bool> {
                 app.recompute_visible();
             }
             KeyCode::Esc => {
-                app.clear_active_filter();
+                if app.show_help {
+                    app.show_help = false;
+                } else {
+                    app.clear_active_filter();
+                }
             }
             _ => {}
         }
