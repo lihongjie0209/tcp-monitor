@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     if cli.dump {
         let conns = diag::query_connections()?;
         let mut rows: Vec<&ConnInfo> = conns.values().collect();
-        rows.sort_by(|a, b| a.rtt_us.cmp(&b.rtt_us));
+        rows.sort_by_key(|a| a.rtt_us);
 
         println!(
             "{:<22} {:<22} {:<7} {:<7} {:>8} {:>8} {:>8} {:>7} {:>9} {:>5}",

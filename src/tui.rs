@@ -374,50 +374,50 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &AppState) {
 
 /// Returns true if the application should quit
 pub fn handle_event(app: &mut AppState, timeout: Duration) -> io::Result<bool> {
-    if event::poll(timeout)? {
-        if let Event::Key(key) = event::read()? {
-            // In filter-edit mode: most keys go to the filter string
-            if app.filter_mode != FilterMode::None {
-                match key.code {
-                    KeyCode::Esc => {
-                        app.filter_mode = FilterMode::None;
-                        // don't clear, just stop editing
-                        app.recompute_visible();
-                    }
-                    KeyCode::Backspace => app.filter_backspace(),
-                    KeyCode::Char(c) => app.filter_push(c),
-                    _ => {}
-                }
-                return Ok(false);
-            }
-
-            // Normal mode
+    if event::poll(timeout)?
+        && let Event::Key(key) = event::read()?
+    {
+        // In filter-edit mode: most keys go to the filter string
+        if app.filter_mode != FilterMode::None {
             match key.code {
-                KeyCode::Char('q') => return Ok(true),
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    return Ok(true);
-                }
-                KeyCode::Char('R') | KeyCode::Char('r') => {
-                    app.sort_asc = !app.sort_asc;
-                    app.recompute_visible();
-                }
-                KeyCode::Up => app.move_up(),
-                KeyCode::Down => app.move_down(),
-                KeyCode::F(3) => {
-                    app.filter_mode = FilterMode::Src;
-                }
-                KeyCode::F(4) => {
-                    app.filter_mode = FilterMode::Dst;
-                }
-                KeyCode::F(6) => {
-                    app.sort_col = app.sort_col.next();
-                    app.recompute_visible();
-                }
                 KeyCode::Esc => {
-                    app.clear_active_filter();
+                    app.filter_mode = FilterMode::None;
+                    // don't clear, just stop editing
+                    app.recompute_visible();
                 }
+                KeyCode::Backspace => app.filter_backspace(),
+                KeyCode::Char(c) => app.filter_push(c),
                 _ => {}
             }
+            return Ok(false);
+        }
+
+        // Normal mode
+        match key.code {
+            KeyCode::Char('q') => return Ok(true),
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Ok(true);
+            }
+            KeyCode::Char('R') | KeyCode::Char('r') => {
+                app.sort_asc = !app.sort_asc;
+                app.recompute_visible();
+            }
+            KeyCode::Up => app.move_up(),
+            KeyCode::Down => app.move_down(),
+            KeyCode::F(3) => {
+                app.filter_mode = FilterMode::Src;
+            }
+            KeyCode::F(4) => {
+                app.filter_mode = FilterMode::Dst;
+            }
+            KeyCode::F(6) => {
+                app.sort_col = app.sort_col.next();
+                app.recompute_visible();
+            }
+            KeyCode::Esc => {
+                app.clear_active_filter();
+            }
+            _ => {}
         }
     }
     Ok(false)
