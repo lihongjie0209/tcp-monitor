@@ -69,32 +69,31 @@ pub struct ConnInfo {
     pub dst: String,
     pub state: TcpState,
     // ── Basic RTT ──────────────────────────────────────────────────────────────
-    pub rtt_us: u32,        // smoothed RTT (us)
-    pub rttvar_us: u32,     // RTT variance / jitter (us)
-    pub min_rtt_us: u32,    // kernel-tracked minimum RTT (us, kernel 4.8+; 0 = unavail)
+    pub rtt_us: u32,     // smoothed RTT (us)
+    pub rttvar_us: u32,  // RTT variance / jitter (us)
+    pub min_rtt_us: u32, // kernel-tracked minimum RTT (us, kernel 4.8+; 0 = unavail)
     // ── Retransmit / loss ──────────────────────────────────────────────────────
-    pub total_retrans: u32,      // cumulative retransmit count
-    pub retrans_in_flight: u32,  // currently in-flight retransmits
-    pub lost: u32,               // packets kernel considers lost (current estimate)
-    pub segs_out: u32,           // total segments sent (kernel 4.2+)
-    pub segs_in: u32,            // total segments received
-    pub bytes_sent: u64,         // total bytes sent (kernel 5.1+)
-    pub bytes_retrans: u64,      // bytes retransmitted (kernel 5.1+)
+    pub total_retrans: u32,     // cumulative retransmit count
+    pub retrans_in_flight: u32, // currently in-flight retransmits
+    pub lost: u32,              // packets kernel considers lost (current estimate)
+    pub segs_out: u32,          // total segments sent (kernel 4.2+)
+    pub segs_in: u32,           // total segments received
+    pub bytes_sent: u64,        // total bytes sent (kernel 5.1+)
+    pub bytes_retrans: u64,     // bytes retransmitted (kernel 5.1+)
     // ── Congestion / window ────────────────────────────────────────────────────
-    pub cwnd: u32,          // congestion window (segments)
-    pub ca_state: u8,       // TCP_CA_Open/Disorder/CWR/Recovery/Loss
-    pub rto_us: u32,        // retransmit timeout (us)
-    pub unacked: u32,       // unacknowledged packets
+    pub cwnd: u32,    // congestion window (segments)
+    pub ca_state: u8, // TCP_CA_Open/Disorder/CWR/Recovery/Loss
+    pub rto_us: u32,  // retransmit timeout (us)
+    pub unacked: u32, // unacknowledged packets
     // ── Throughput ─────────────────────────────────────────────────────────────
-    pub delivery_rate_bps: u64,  // bytes/sec delivery rate (kernel 4.9+)
+    pub delivery_rate_bps: u64, // bytes/sec delivery rate (kernel 4.9+)
     // ── Path ───────────────────────────────────────────────────────────────────
     pub pmtu: u32,
     pub snd_mss: u32,
     // ── Historical stats (computed across samples) ─────────────────────────────
-    pub prev_retrans: u32,
-    pub retrans_delta: u32,  // retrans since last sample
+    pub retrans_delta: u32, // retrans since last sample
     pub samples: u64,
-    pub rtt_min_us: u32,     // our tracked min (across all samples)
+    pub rtt_min_us: u32, // our tracked min (across all samples)
     pub rtt_max_us: u32,
     pub rtt_sum_us: u64,
 }
@@ -110,12 +109,18 @@ impl ConnInfo {
         self.rto_us as f64 / 1000.0
     }
     pub fn rtt_avg_ms(&self) -> f64 {
-        if self.samples == 0 { 0.0 }
-        else { self.rtt_sum_us as f64 / self.samples as f64 / 1000.0 }
+        if self.samples == 0 {
+            0.0
+        } else {
+            self.rtt_sum_us as f64 / self.samples as f64 / 1000.0
+        }
     }
     pub fn rtt_min_ms(&self) -> f64 {
-        if self.rtt_min_us == u32::MAX { 0.0 }
-        else { self.rtt_min_us as f64 / 1000.0 }
+        if self.rtt_min_us == u32::MAX {
+            0.0
+        } else {
+            self.rtt_min_us as f64 / 1000.0
+        }
     }
     pub fn rtt_max_ms(&self) -> f64 {
         self.rtt_max_us as f64 / 1000.0
@@ -126,18 +131,24 @@ impl ConnInfo {
     }
     /// Retransmit rate % = total_retrans / segs_out
     pub fn retrans_rate_pct(&self) -> f64 {
-        if self.segs_out == 0 { return 0.0; }
+        if self.segs_out == 0 {
+            return 0.0;
+        }
         self.total_retrans as f64 / self.segs_out as f64 * 100.0
     }
     /// Byte retransmit rate % = bytes_retrans / bytes_sent (kernel 5.1+)
     pub fn bytes_retrans_pct(&self) -> f64 {
-        if self.bytes_sent == 0 { return 0.0; }
+        if self.bytes_sent == 0 {
+            return 0.0;
+        }
         self.bytes_retrans as f64 / self.bytes_sent as f64 * 100.0
     }
     /// Packet loss rate % = lost / (segs_out + lost)
     pub fn loss_pct(&self) -> f64 {
         let denom = self.segs_out as f64 + self.lost as f64;
-        if denom == 0.0 { return 0.0; }
+        if denom == 0.0 {
+            return 0.0;
+        }
         self.lost as f64 / denom * 100.0
     }
     /// Delivery rate in MB/s
@@ -222,6 +233,7 @@ impl SortColumn {
             Self::Cwnd => Self::Src,
         }
     }
+    #[allow(dead_code)]
     pub fn label(&self) -> &'static str {
         match self {
             Self::Src => "Source",

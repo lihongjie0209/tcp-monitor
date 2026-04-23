@@ -38,10 +38,10 @@ struct NlMsgHdr {
 #[repr(C)]
 #[derive(Default, Copy, Clone)]
 struct InetDiagSockId {
-    sport: u16,      // network byte order
-    dport: u16,      // network byte order
-    src: [u32; 4],   // network byte order (only [0] used for IPv4)
-    dst: [u32; 4],   // network byte order
+    sport: u16,    // network byte order
+    dport: u16,    // network byte order
+    src: [u32; 4], // network byte order (only [0] used for IPv4)
+    dst: [u32; 4], // network byte order
     iface: u32,
     cookie: [u32; 2],
 }
@@ -51,7 +51,7 @@ struct InetDiagSockId {
 struct InetDiagReqV2 {
     sdiag_family: u8,
     sdiag_protocol: u8,
-    idiag_ext: u8,   // bitmask: bit (N-1) requests extension N
+    idiag_ext: u8, // bitmask: bit (N-1) requests extension N
     pad: u8,
     idiag_states: u32, // bitmask of TCP states to include
     id: InetDiagSockId,
@@ -95,15 +95,15 @@ struct TcpInfo {
     wscale: u8,
     app_limited: u8,
     // offset 8
-    rto: u32,            // retransmit timeout (us)
+    rto: u32, // retransmit timeout (us)
     ato: u32,
     snd_mss: u32,
     rcv_mss: u32,
     // offset 24
-    unacked: u32,        // unacknowledged packets
-    sacked: u32,         // SACK'd packets
-    lost: u32,           // lost packets (kernel estimate)
-    retrans: u32,        // retransmits in flight
+    unacked: u32, // unacknowledged packets
+    sacked: u32,  // SACK'd packets
+    lost: u32,    // lost packets (kernel estimate)
+    retrans: u32, // retransmits in flight
     fackets: u32,
     // offset 44
     last_data_sent: u32,
@@ -113,41 +113,41 @@ struct TcpInfo {
     // offset 60
     pmtu: u32,
     rcv_ssthresh: u32,
-    rtt: u32,            // smoothed RTT (us)
-    rttvar: u32,         // RTT variance (us)
+    rtt: u32,    // smoothed RTT (us)
+    rttvar: u32, // RTT variance (us)
     snd_ssthresh: u32,
-    snd_cwnd: u32,       // congestion window
+    snd_cwnd: u32, // congestion window
     advmss: u32,
     reordering: u32,
     // offset 92
     rcv_rtt: u32,
     rcv_space: u32,
-    total_retrans: u32,  // cumulative retransmits (offset 100)
+    total_retrans: u32, // cumulative retransmits (offset 100)
     // ── kernel 3.15+ ──────────────── (offset 104)
     pacing_rate: u64,
     max_pacing_rate: u64,
     // ── kernel 4.2+ ───────────────── (offset 120)
     bytes_acked: u64,
     bytes_received: u64,
-    segs_out: u32,       // segments sent    (offset 136)
-    segs_in: u32,        // segments received (offset 140)
+    segs_out: u32, // segments sent    (offset 136)
+    segs_in: u32,  // segments received (offset 140)
     notsent_bytes: u32,
-    min_rtt: u32,        // minimum RTT ever observed (us, offset 148)
+    min_rtt: u32, // minimum RTT ever observed (us, offset 148)
     data_segs_in: u32,
     data_segs_out: u32,
     // ── kernel 4.9+ ───────────────── (offset 160)
-    delivery_rate: u64,  // bytes/sec
+    delivery_rate: u64, // bytes/sec
     // ── kernel 4.18+ ──────────────── (offset 168)
     busy_time: u64,
     rwnd_limited: u64,
     sndbuf_limited: u64,
-    delivered: u32,      // offset 192
+    delivered: u32, // offset 192
     delivered_ce: u32,
     // ── kernel 5.1+ ───────────────── (offset 200)
     bytes_sent: u64,
-    bytes_retrans: u64,  // bytes retransmitted (offset 208)
+    bytes_retrans: u64, // bytes retransmitted (offset 208)
     dsack_dups: u32,
-    reord_seen: u32,     // reorder events (offset 220)
+    reord_seen: u32, // reorder events (offset 220)
 }
 
 /// Minimum bytes the kernel always provides (through total_retrans, offset 100).
@@ -158,14 +158,11 @@ const TCP_INFO_MIN_SIZE: usize = 104;
 pub fn query_connections() -> io::Result<HashMap<String, ConnInfo>> {
     let mut map = HashMap::new();
     for family in [libc::AF_INET as u8, libc::AF_INET6 as u8] {
-        match query_family(family) {
-            Ok(entries) => {
-                for e in entries {
-                    map.insert(e.key.clone(), e);
-                }
+        if let Ok(entries) = query_family(family) {
+            for e in entries {
+                map.insert(e.key.clone(), e);
             }
-            Err(_) => {} // best-effort; skip failed family
-        }
+        } // best-effort; skip failed family
     }
     Ok(map)
 }
@@ -252,8 +249,7 @@ fn recv_and_parse(fd: libc::c_int, family: u8) -> io::Result<Vec<ConnInfo>> {
         let mut offset = 0usize;
 
         while offset + mem::size_of::<NlMsgHdr>() <= n {
-            let hdr: NlMsgHdr =
-                unsafe { ptr_read_unaligned(&recv_buf[offset..]) };
+            let hdr: NlMsgHdr = unsafe { ptr_read_unaligned(&recv_buf[offset..]) };
             let msg_len = hdr.nlmsg_len as usize;
 
             if msg_len < mem::size_of::<NlMsgHdr>() || offset + msg_len > n {
@@ -264,11 +260,9 @@ fn recv_and_parse(fd: libc::c_int, family: u8) -> io::Result<Vec<ConnInfo>> {
                 NLMSG_DONE => break 'outer,
                 NLMSG_ERROR => break 'outer,
                 SOCK_DIAG_BY_FAMILY => {
-                    let data = &recv_buf[offset + mem::size_of::<NlMsgHdr>()
-                        ..offset + msg_len];
+                    let data = &recv_buf[offset + mem::size_of::<NlMsgHdr>()..offset + msg_len];
                     if data.len() >= mem::size_of::<InetDiagMsg>() {
-                        let dmsg: InetDiagMsg =
-                            unsafe { ptr_read_unaligned(data) };
+                        let dmsg: InetDiagMsg = unsafe { ptr_read_unaligned(data) };
                         let nla_data = &data[mem::size_of::<InetDiagMsg>()..];
                         let tcp_info = parse_tcp_info_nla(nla_data);
                         if let Some(ci) = build_conn_info(&dmsg, tcp_info, family) {
@@ -314,11 +308,7 @@ fn parse_tcp_info_nla(buf: &[u8]) -> Option<TcpInfo> {
     None
 }
 
-fn build_conn_info(
-    msg: &InetDiagMsg,
-    tcp_info: Option<TcpInfo>,
-    family: u8,
-) -> Option<ConnInfo> {
+fn build_conn_info(msg: &InetDiagMsg, tcp_info: Option<TcpInfo>, family: u8) -> Option<ConnInfo> {
     // Skip listening / unconnected sockets
     if msg.id.dport == 0 {
         return None;
@@ -335,16 +325,46 @@ fn build_conn_info(
     let key = format!("{src}→{dst}");
     let state = TcpState::from_u8(msg.idiag_state);
 
-    let (rtt_us, rttvar_us, total_retrans, cwnd,
-         ca_state, rto_us, unacked, lost, retrans_in_flight,
-         segs_out, segs_in, min_rtt_us, delivery_rate_bps,
-         bytes_sent, bytes_retrans, pmtu, snd_mss) = tcp_info
-        .map(|t| (
-            t.rtt, t.rttvar, t.total_retrans, t.snd_cwnd,
-            t.ca_state, t.rto, t.unacked, t.lost, t.retrans,
-            t.segs_out, t.segs_in, t.min_rtt, t.delivery_rate,
-            t.bytes_sent, t.bytes_retrans, t.pmtu, t.snd_mss,
-        ))
+    let (
+        rtt_us,
+        rttvar_us,
+        total_retrans,
+        cwnd,
+        ca_state,
+        rto_us,
+        unacked,
+        lost,
+        retrans_in_flight,
+        segs_out,
+        segs_in,
+        min_rtt_us,
+        delivery_rate_bps,
+        bytes_sent,
+        bytes_retrans,
+        pmtu,
+        snd_mss,
+    ) = tcp_info
+        .map(|t| {
+            (
+                t.rtt,
+                t.rttvar,
+                t.total_retrans,
+                t.snd_cwnd,
+                t.ca_state,
+                t.rto,
+                t.unacked,
+                t.lost,
+                t.retrans,
+                t.segs_out,
+                t.segs_in,
+                t.min_rtt,
+                t.delivery_rate,
+                t.bytes_sent,
+                t.bytes_retrans,
+                t.pmtu,
+                t.snd_mss,
+            )
+        })
         .unwrap_or((0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
 
     Some(ConnInfo {
@@ -369,7 +389,6 @@ fn build_conn_info(
         bytes_retrans,
         pmtu,
         snd_mss,
-        prev_retrans: total_retrans,
         retrans_delta: 0,
         samples: if rtt_us > 0 { 1 } else { 0 },
         rtt_min_us: if rtt_us > 0 { rtt_us } else { u32::MAX },
@@ -460,10 +479,16 @@ mod tests {
         println!("Total connections: {}", conns.len());
 
         let our_port = client.local_addr().unwrap().port();
-        let found = conns.values().any(|c| c.src.ends_with(&format!(":{our_port}")));
+        let found = conns
+            .values()
+            .any(|c| c.src.ends_with(&format!(":{our_port}")));
         println!("Our loopback conn (src port {our_port}) found: {found}");
 
-        for c in conns.values().filter(|c| c.state == crate::app::TcpState::Established).take(3) {
+        for c in conns
+            .values()
+            .filter(|c| c.state == crate::app::TcpState::Established)
+            .take(3)
+        {
             println!("  ESTAB {} rtt={:.3}ms cwnd={}", c.key, c.rtt_ms(), c.cwnd);
         }
 

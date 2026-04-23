@@ -2,12 +2,12 @@
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
-    Frame, Terminal,
 };
 use std::{io, time::Duration};
 
@@ -40,12 +40,16 @@ pub fn draw(f: &mut Frame, app: &mut AppState, table_state: &mut TableState) {
 
 fn draw_header(f: &mut Frame, area: Rect, app: &AppState) {
     let src_style = if app.filter_mode == FilterMode::Src {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::White)
     };
     let dst_style = if app.filter_mode == FilterMode::Dst {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::White)
     };
@@ -62,7 +66,12 @@ fn draw_header(f: &mut Frame, area: Rect, app: &AppState) {
     };
 
     let line = Line::from(vec![
-        Span::styled(" tcp-monitor ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " tcp-monitor ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("│ Src: "),
         Span::styled(src_filter, src_style),
         Span::raw(" │ Dst: "),
@@ -74,8 +83,7 @@ fn draw_header(f: &mut Frame, area: Rect, app: &AppState) {
         )),
     ]);
 
-    let para = Paragraph::new(line)
-        .style(Style::default().bg(Color::DarkGray));
+    let para = Paragraph::new(line).style(Style::default().bg(Color::DarkGray));
     f.render_widget(para, area);
 }
 
@@ -130,7 +138,9 @@ fn draw_table(f: &mut Frame, area: Rect, app: &mut AppState, table_state: &mut T
             };
 
             let retrans_style = if c.retrans_delta > 0 {
-                Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::LightRed)
+                    .add_modifier(Modifier::BOLD)
             } else if c.total_retrans > 0 {
                 Style::default().fg(Color::Yellow)
             } else {
@@ -138,13 +148,17 @@ fn draw_table(f: &mut Frame, area: Rect, app: &mut AppState, table_state: &mut T
             };
 
             let loss_style = if c.lost > 0 {
-                Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::LightRed)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Green)
             };
 
             let ca_style = if c.ca_is_bad() {
-                Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::LightRed)
+                    .add_modifier(Modifier::BOLD)
             } else if c.ca_state > 0 {
                 Style::default().fg(Color::Yellow)
             } else {
@@ -214,7 +228,11 @@ fn draw_table(f: &mut Frame, area: Rect, app: &mut AppState, table_state: &mut T
                 .add_modifier(Modifier::BOLD),
         );
 
-    table_state.select(if app.visible.is_empty() { None } else { Some(app.selected) });
+    table_state.select(if app.visible.is_empty() {
+        None
+    } else {
+        Some(app.selected)
+    });
     f.render_stateful_widget(table, area, table_state);
 }
 
@@ -228,18 +246,27 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &AppState) {
     };
 
     let na = |v: f64, unit: &str| -> String {
-        if v == 0.0 { "  n/a ".to_string() }
-        else { format!("{:.3}{}", v, unit) }
+        if v == 0.0 {
+            "  n/a ".to_string()
+        } else {
+            format!("{v:.3}{unit}")
+        }
     };
     let na_u64 = |v: u64| -> String {
-        if v == 0 { "n/a".to_string() }
-        else { format_bytes(v) }
+        if v == 0 {
+            "n/a".to_string()
+        } else {
+            format_bytes(v)
+        }
     };
 
     let lines = vec![
         Line::from(vec![
             Span::raw("  RTT: "),
-            Span::styled(format!("{:.3}ms", conn.rtt_ms()), Style::default().fg(Color::Cyan)),
+            Span::styled(
+                format!("{:.3}ms", conn.rtt_ms()),
+                Style::default().fg(Color::Cyan),
+            ),
             Span::raw(format!("  jitter: {:.3}ms", conn.rttvar_ms())),
             Span::raw(format!("  min(kern): {}", na(conn.kern_min_rtt_ms(), "ms"))),
             Span::raw(format!("  min(seen): {}", na(conn.rtt_min_ms(), "ms"))),
@@ -252,25 +279,39 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &AppState) {
             Span::styled(
                 conn.ca_state_str(),
                 if conn.ca_is_bad() {
-                    Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::LightRed)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::Green)
                 },
             ),
-            Span::raw(format!("  Unacked: {}  Sacked: {}  Lost: {}  In-flight retrans: {}",
-                conn.unacked, conn.lost, conn.lost, conn.retrans_in_flight)),
+            Span::raw(format!(
+                "  Unacked: {}  Sacked: {}  Lost: {}  In-flight retrans: {}",
+                conn.unacked, conn.lost, conn.lost, conn.retrans_in_flight
+            )),
         ]),
         Line::from(vec![
             Span::raw("  Retrans: "),
             Span::styled(
                 format!("{}", conn.total_retrans),
-                if conn.total_retrans > 0 { Style::default().fg(Color::Yellow) }
-                else { Style::default().fg(Color::Green) },
+                if conn.total_retrans > 0 {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default().fg(Color::Green)
+                },
             ),
-            Span::raw(format!("  rate: {:.3}%  | Loss%: {:.3}%  (lost pkts: {})",
-                conn.retrans_rate_pct(), conn.loss_pct(), conn.lost)),
-            Span::raw(format!("  bytes retrans: {} ({:.3}%)",
-                na_u64(conn.bytes_retrans), conn.bytes_retrans_pct())),
+            Span::raw(format!(
+                "  rate: {:.3}%  | Loss%: {:.3}%  (lost pkts: {})",
+                conn.retrans_rate_pct(),
+                conn.loss_pct(),
+                conn.lost
+            )),
+            Span::raw(format!(
+                "  bytes retrans: {} ({:.3}%)",
+                na_u64(conn.bytes_retrans),
+                conn.bytes_retrans_pct()
+            )),
         ]),
         Line::from(vec![
             Span::raw("  Delivery rate: "),
@@ -278,40 +319,56 @@ fn draw_detail(f: &mut Frame, area: Rect, app: &AppState) {
                 format!("{:.2} MB/s", conn.delivery_rate_mbps()),
                 Style::default().fg(Color::Cyan),
             ),
-            Span::raw(format!("  Sent: {}  Recv: {}",
-                na_u64(conn.bytes_sent), na_u64(0u64))),
-            Span::raw(format!("  Segs out: {}  Segs in: {}", conn.segs_out, conn.segs_in)),
+            Span::raw(format!(
+                "  Sent: {}  Recv: {}",
+                na_u64(conn.bytes_sent),
+                na_u64(0u64)
+            )),
+            Span::raw(format!(
+                "  Segs out: {}  Segs in: {}",
+                conn.segs_out, conn.segs_in
+            )),
         ]),
         Line::from(vec![
-            Span::raw(format!("  CWND: {}  MSS: {}  PMTU: {}",
-                conn.cwnd, conn.snd_mss, conn.pmtu)),
+            Span::raw(format!(
+                "  CWND: {}  MSS: {}  PMTU: {}",
+                conn.cwnd, conn.snd_mss, conn.pmtu
+            )),
             Span::raw(format!("  Samples: {}", conn.samples)),
         ]),
     ];
 
-    let para = Paragraph::new(lines)
-        .block(Block::default()
+    let para = Paragraph::new(lines).block(
+        Block::default()
             .borders(Borders::ALL)
             .title(format!(" ▶ {} → {} ", conn.src, conn.dst))
-            .border_style(Style::default().fg(Color::Cyan)));
+            .border_style(Style::default().fg(Color::Cyan)),
+    );
     f.render_widget(para, area);
 }
 
 fn format_bytes(n: u64) -> String {
-    if n >= 1_000_000_000 { format!("{:.1}GB", n as f64 / 1e9) }
-    else if n >= 1_000_000 { format!("{:.1}MB", n as f64 / 1e6) }
-    else if n >= 1_000 { format!("{:.1}KB", n as f64 / 1e3) }
-    else { format!("{}B", n) }
+    if n >= 1_000_000_000 {
+        format!("{:.1}GB", n as f64 / 1e9)
+    } else if n >= 1_000_000 {
+        format!("{:.1}MB", n as f64 / 1e6)
+    } else if n >= 1_000 {
+        format!("{:.1}KB", n as f64 / 1e3)
+    } else {
+        format!("{n}B")
+    }
 }
 
 fn draw_footer(f: &mut Frame, area: Rect, app: &AppState) {
     let filter_hint = match app.filter_mode {
-        FilterMode::None => " F3 SrcFilter  F4 DstFilter  F6 SortBy(RTT/Jitter/Retrans/Loss/Rate/…)  R Reverse  ESC Clear  q Quit ",
+        FilterMode::None => {
+            " F3 SrcFilter  F4 DstFilter  F6 SortBy(RTT/Jitter/Retrans/Loss/Rate/…)  R Reverse  ESC Clear  q Quit "
+        }
         FilterMode::Src => " [Editing Src Filter — type to filter, ESC when done] ",
         FilterMode::Dst => " [Editing Dst Filter — type to filter, ESC when done] ",
     };
-    let para = Paragraph::new(filter_hint)
-        .style(Style::default().bg(Color::DarkGray).fg(Color::White));
+    let para =
+        Paragraph::new(filter_hint).style(Style::default().bg(Color::DarkGray).fg(Color::White));
     f.render_widget(para, area);
 }
 
@@ -338,7 +395,7 @@ pub fn handle_event(app: &mut AppState, timeout: Duration) -> io::Result<bool> {
             match key.code {
                 KeyCode::Char('q') => return Ok(true),
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    return Ok(true)
+                    return Ok(true);
                 }
                 KeyCode::Char('R') | KeyCode::Char('r') => {
                     app.sort_asc = !app.sort_asc;

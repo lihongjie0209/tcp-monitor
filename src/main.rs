@@ -34,13 +34,25 @@ async fn main() -> anyhow::Result<()> {
         let mut rows: Vec<&ConnInfo> = conns.values().collect();
         rows.sort_by(|a, b| a.rtt_us.cmp(&b.rtt_us));
 
-        println!("{:<22} {:<22} {:<7} {:<7} {:>8} {:>8} {:>8} {:>7} {:>9} {:>5}",
-            "Source", "Destination", "State", "CA",
-            "RTT(ms)", "Jitter", "Retrans", "Loss%", "Rate MB/s", "CWND");
+        println!(
+            "{:<22} {:<22} {:<7} {:<7} {:>8} {:>8} {:>8} {:>7} {:>9} {:>5}",
+            "Source",
+            "Destination",
+            "State",
+            "CA",
+            "RTT(ms)",
+            "Jitter",
+            "Retrans",
+            "Loss%",
+            "Rate MB/s",
+            "CWND"
+        );
         println!("{}", "-".repeat(115));
         for c in &rows {
-            println!("{:<22} {:<22} {:<7} {:<7} {:>8.3} {:>8.3} {:>8} {:>7.2} {:>9.2} {:>5}",
-                c.src, c.dst,
+            println!(
+                "{:<22} {:<22} {:<7} {:<7} {:>8.3} {:>8.3} {:>8} {:>7.2} {:>9.2} {:>5}",
+                c.src,
+                c.dst,
                 format!("{:?}", c.state),
                 c.ca_state_str(),
                 c.rtt_ms(),
@@ -52,10 +64,15 @@ async fn main() -> anyhow::Result<()> {
             );
             // Print extended metrics as a sub-line
             if c.rto_us > 0 || c.lost > 0 || c.segs_out > 0 {
-                println!("  ↳ RTO:{:.1}ms  lost:{} unacked:{}  segs_out:{} segs_in:{}  retrans%:{:.3}%  bytes_retrans%:{:.3}%",
-                    c.rto_ms(), c.lost, c.unacked,
-                    c.segs_out, c.segs_in,
-                    c.retrans_rate_pct(), c.bytes_retrans_pct(),
+                println!(
+                    "  ↳ RTO:{:.1}ms  lost:{} unacked:{}  segs_out:{} segs_in:{}  retrans%:{:.3}%  bytes_retrans%:{:.3}%",
+                    c.rto_ms(),
+                    c.lost,
+                    c.unacked,
+                    c.segs_out,
+                    c.segs_in,
+                    c.retrans_rate_pct(),
+                    c.bytes_retrans_pct(),
                 );
             }
         }
