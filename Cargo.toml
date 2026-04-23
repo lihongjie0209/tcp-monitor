@@ -1,0 +1,20 @@
+[package]
+name = "tcp-monitor"
+version = "0.1.0"
+edition = "2024"
+description = "Real-time TCP connection quality monitor with an htop-style TUI — reads kernel metrics via Linux Netlink INET_DIAG"
+license = "MIT"
+repository = "https://github.com/lihongjie0209/tcp-monitor"
+homepage = "https://github.com/lihongjie0209/tcp-monitor"
+readme = "README.md"
+keywords = ["tcp", "network", "monitor", "tui", "linux"]
+categories = ["command-line-utilities", "network-programming"]
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+ratatui = "0.29"
+crossterm = "0.28"
+clap = { version = "4", features = ["derive"] }
+libc = "0.2"
+anyhow = "1"
+humantime = "2"

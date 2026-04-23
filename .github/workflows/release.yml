@@ -1,0 +1,179 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64 — static musl (runs on any distro, no glibc dependency)
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: false
+            archive: tar.gz
+
+          # Linux aarch64 — static musl (ARM64: AWS Graviton, Raspberry Pi 4+, etc.)
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+            archive: tar.gz
+
+          # Linux x86_64 — glibc (for distros where musl causes issues)
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: false
+            archive: tar.gz
+
+          # Linux aarch64 — glibc
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: true
+            archive: tar.gz
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools (for native musl build)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get install -y musl-tools
+
+      - name: Install cross (for cross-compilation)
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-release-
+
+      - name: Build release binary (native)
+        if: '!matrix.cross'
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build release binary (cross)
+        if: matrix.cross
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Strip binary
+        run: |
+          BINARY_PATH="target/${{ matrix.target }}/release/tcp-monitor"
+          # Use appropriate strip tool for cross-compiled binaries
+          if [[ "${{ matrix.target }}" == "aarch64-"* ]]; then
+            which aarch64-linux-gnu-strip 2>/dev/null && \
+              aarch64-linux-gnu-strip "$BINARY_PATH" || \
+              echo "No aarch64 strip available, skipping"
+          else
+            strip "$BINARY_PATH" || echo "Strip failed, continuing"
+          fi
+        shell: bash
+
+      - name: Create archive
+        id: archive
+        run: |
+          BINARY_NAME="tcp-monitor"
+          ARCHIVE_NAME="${BINARY_NAME}-${{ matrix.target }}"
+
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${BINARY_NAME}" "dist/${BINARY_NAME}"
+          cp README.md LICENSE dist/
+
+          cd dist
+          tar czf "../${ARCHIVE_NAME}.tar.gz" "${BINARY_NAME}" README.md LICENSE
+          cd ..
+
+          echo "archive=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_OUTPUT
+          echo "sha256=$(sha256sum ${ARCHIVE_NAME}.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ steps.archive.outputs.archive }}
+          retention-days: 1
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect archives
+        id: collect
+        run: |
+          find artifacts -name '*.tar.gz' -o -name '*.zip' | sort
+          # Generate checksums
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) | while read f; do
+            sha256sum "$f" >> SHA256SUMS.txt
+          done
+          cat SHA256SUMS.txt
+        shell: bash
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.changelog.outputs.tag }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
+            SHA256SUMS.txt
+          body: |
+            ## Installation
+
+            ### Linux x86_64 (static, recommended)
+            ```bash
+            curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/tcp-monitor-x86_64-unknown-linux-musl.tar.gz | tar xz
+            sudo mv tcp-monitor /usr/local/bin/
+            tcp-monitor --version
+            ```
+
+            ### Linux ARM64 (aarch64)
+            ```bash
+            curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/tcp-monitor-aarch64-unknown-linux-musl.tar.gz | tar xz
+            sudo mv tcp-monitor /usr/local/bin/
+            ```
+
+            ## Checksums
+
+            See `SHA256SUMS.txt` attached to this release.
